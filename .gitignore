@@ -1,0 +1,15 @@
+# ROMs and saves stay local
+rom/
+*.nds
+*.dsv
+*.sav
+*.dst
+*.dst0
+
+# runtime artifacts
+logs/
+*.log
+nohup.out
+__pycache__/
+*.pyc
+.DS_Store
