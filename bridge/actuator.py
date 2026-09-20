@@ -89,6 +89,12 @@ def execute(app, body):
             app.release_all()
             return {"ok": True, "frame": app.frame}
 
+        if action == "set_goal":
+            text = body.get("text")
+            if not isinstance(text, str) or not text.strip():
+                return {"ok": False, "reason": "bad_text"}
+            return {"ok": True, "frame": app.frame}
+
         if action == "advance_dialog":
             from bridge.controllers import DialogController
             return _start_controller(app, DialogController(body))

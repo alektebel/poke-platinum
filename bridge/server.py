@@ -2,15 +2,23 @@ import io
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from bridge.telemetry import Telemetry
+
 MAX_BODY = 4096
+WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+MIME = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+        ".png": "image/png", ".json": "application/json", ".svg": "image/svg+xml"}
 
 
 class BridgeState:
     def __init__(self, app, catalog):
         self.app = app
         self.catalog = catalog
+        self.telemetry = Telemetry()
+        self.experiment = None  # set by run_bridge when --record is passed
 
 
 def make_handler(state: BridgeState):
@@ -26,8 +34,27 @@ def make_handler(state: BridgeState):
             self.end_headers()
             self.wfile.write(body)
 
+        def _file(self, rel):
+            path = os.path.normpath(os.path.join(WEB_DIR, rel))
+            if not path.startswith(WEB_DIR) or not os.path.isfile(path):
+                self._json(404, {"error": "not_found"})
+                return
+            ext = os.path.splitext(path)[1]
+            data = open(path, "rb").read()
+            self.send_response(200)
+            self.send_header("Content-Type", MIME.get(ext, "application/octet-stream"))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
         def do_GET(self):
             app = state.app
+            if self.path in ("/", "/index.html"):
+                self._file("index.html")
+                return
+            if self.path.startswith("/web/"):
+                self._file(self.path[len("/web/"):].split("?")[0])
+                return
             if self.path == "/ping":
                 self._json(200, {"ok": True, "frame": app.frame, "fps": round(app.fps(), 1),
                                  "turbo": app.turbo, "controller": app.controller.name if app.controller else None})
@@ -42,6 +69,10 @@ def make_handler(state: BridgeState):
             elif self.path == "/memory":
                 mem = getattr(app, "memory", None)
                 self._json(200, mem.snapshot() if mem else {"error": "no_memory"})
+            elif self.path == "/telemetry":
+                snap = state.telemetry.snapshot(app)
+                snap["experiment"] = state.experiment.info() if state.experiment else None
+                self._json(200, snap)
             elif self.path.startswith("/mem"):
                 try:
                     qs = self.path.split("?", 1)[1] if "?" in self.path else ""
@@ -90,11 +121,29 @@ def make_handler(state: BridgeState):
             except Exception:
                 self._json(400, {"ok": False, "reason": "bad_json"})
                 return
+            # System 2 declares goals either standalone (action=set_goal,
+            # level: mission|phase) or attaches a subgoal to a command via "goal".
+            if body.get("action") == "set_goal":
+                level = body.get("level", "mission")
+                state.telemetry.set_goal(body.get("text"), note=body.get("note"),
+                                         main=(level != "phase"))
+            else:
+                goal = body.get("goal")
+                if isinstance(goal, str) and goal.strip():
+                    state.telemetry.set_goal(goal, note=body.get("goal_note"), main=False)
+            t0 = time.time()
             pending = state.app.submit(body)
             timeout = _timeout_for(body)
             if pending.done.wait(timeout):
+                pending.result = pending.result or {}
+                state.telemetry.record_action(body, pending.result)
+                if state.experiment:
+                    state.experiment.record_command(body, pending.result, time.time() - t0)
                 self._json(200, pending.result)
             else:
+                state.telemetry.record_action(body, {"ok": False, "reason": "timeout"})
+                if state.experiment:
+                    state.experiment.record_command(body, {"ok": False, "reason": "timeout"}, time.time() - t0)
                 self._json(504, {"ok": False, "reason": "timeout"})
 
     return Handler
@@ -102,6 +151,8 @@ def make_handler(state: BridgeState):
 
 def _timeout_for(body):
     action = body.get("action", "")
+    if action == "set_goal":
+        return 10
     if action in ("advance_dialog", "walk_to", "menu_navigate", "battle_fight"):
         return 600
     if action in ("debug_scan", "debug_mark", "debug_diff"):

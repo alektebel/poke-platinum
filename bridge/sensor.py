@@ -134,7 +134,8 @@ class Sensor:
         return out
 
     # -- main snapshot -----------------------------------------------------
-    def snapshot(self):
+    def raw_state(self):
+        """Full snapshot WITHOUT event diffing (safe to call from any thread)."""
         app = self.app
         snap = {
             "frame": app.frame,
@@ -149,7 +150,6 @@ class Sensor:
         fs = self._field_system()
         if fs is None:
             snap["note"] = "no_field_system (title/menus/non-field scene)"
-            self._diff(snap)
             return snap
 
         game = {"scene": "field"}
@@ -192,6 +192,10 @@ class Sensor:
 
         snap["game"] = game
         snap.pop("note", None)
+        return snap
+
+    def snapshot(self):
+        snap = self.raw_state()
         self._diff(snap)
         return snap
 

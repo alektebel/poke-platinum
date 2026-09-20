@@ -20,10 +20,10 @@ def _u16(b, o):
     return int.from_bytes(b[o:o + 2], "little")
 
 
-def decode_charcodes(b):
+def decode_charcodes(b, max_chars=300):
     """decode a bytes buffer as u16 charcode stream -> printable text"""
     out = []
-    for o in range(0, len(b) - 1, 2):
+    for o in range(0, min(len(b) - 1, max_chars * 2), 2):
         v = _u16(b, o)
         if v == EOS:
             break
@@ -63,17 +63,23 @@ class DialogReader:
 
     def on_open(self):
         try:
-            self.prev = bytes(self.app.emu.memory.read(SCAN_LO, SCAN_HI, 1, False))
+            prev = bytes(self.app.emu.memory.read(SCAN_LO, SCAN_HI, 1, False))
+            self.prev = prev
             self.open_frame = self.app.frame
             self.text = None
         except Exception:
             self.prev = None
 
     def poll(self):
-        """call each snapshot; returns text once decoded (once per dialog)"""
-        if self.prev is None or self.text is not None:
+        """call each snapshot; returns text once decoded (once per dialog).
+
+        Thread-safe against concurrent snapshot() calls: works on local
+        copies so a sibling poll() resetting self.prev can't crash us.
+        """
+        prev, open_frame = self.prev, self.open_frame
+        if prev is None or self.text is not None or open_frame is None:
             return None
-        if self.app.frame - self.open_frame < DECAY_FRAMES:
+        if self.app.frame - open_frame < DECAY_FRAMES:
             return None
         try:
             cur = bytes(self.app.emu.memory.read(SCAN_LO, SCAN_HI, 1, False))
@@ -81,16 +87,25 @@ class DialogReader:
             self.prev = None
             return None
         best = ""
-        for lo, hi in _changed_ranges(self.prev, cur):
-            span = cur[max(0, lo - 64):hi + 64]
-            # scan inside the changed span for the longest decodable run
-            for start in range(0, max(1, len(span) - 4), 2):
-                chunk = span[start:]
-                t = decode_charcodes(chunk)
+        for lo, hi in _changed_ranges(prev, cur):
+            if hi - lo > 1 << 16:
+                continue  # huge heap shift (scene load), not dialog typing
+            span = cur[max(0, lo - 512):hi + 64][:8192]
+            # find candidate string starts: offsets where 2+ consecutive
+            # u16s decode to real chars (skips garbage prefixes fast)
+            for start in range(0, len(span) - 8, 2):
+                if CHARMAP.get(_u16(span, start)) is None:
+                    continue
+                if CHARMAP.get(_u16(span, start + 2)) is None and \
+                   CHARMAP.get(_u16(span, start + 4)) is None:
+                    continue
+                t = decode_charcodes(span[start:])
                 if len(t) > len(best):
                     best = t
-                if len(best) > 12 and (EOS * 2) in chunk[:8]:
+                if len(best) > 12 and b"\xff\xff" in span[start:start + 8]:
                     break
+            if len(best) > 12:
+                break
         self.text = best if len(best) >= 4 else None
         self.prev = None
         return self.text

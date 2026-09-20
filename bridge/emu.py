@@ -44,6 +44,7 @@ class EmuApp:
         self._png_lock = threading.Lock()
         self._t0 = time.monotonic()
         self._frames_at_t0 = 0
+        self.pending_state = savestate_path  # loaded once the emu is live
 
     def boot(self):
         self.emu.open(self.rom_path)
@@ -54,6 +55,13 @@ class EmuApp:
         self.boot()
         try:
             while not self.stopped:
+                if self.pending_state is not None and self.frame >= 30:
+                    path, self.pending_state = self.pending_state, None
+                    try:
+                        self.loadstate(path)
+                        print(f"[jev] savestate loaded: {path}")
+                    except Exception as e:
+                        print(f"[jev] savestate load failed: {e}")
                 self.step()
         finally:
             self.shutdown()

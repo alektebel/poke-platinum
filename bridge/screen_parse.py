@@ -68,7 +68,10 @@ def parse(img):
     """img: PIL RGB composite. Returns screen-state dict."""
     b = _bands(img)
     out = {}
-    out["message_box"] = _runs_white(img, b["top_dialog"]) >= 3
+    # Platinum renders the dialog box on the BOTTOM screen (top of it);
+    # DP-era boxes on the top screen still supported for safety.
+    out["message_box"] = (_runs_white(img, b["top_dialog"]) >= 3 or
+                          _runs_white(img, (b["bottom_start"], b["bottom_start"] + 48)) >= 3)
     btns = _buttons(img, b["bottom_start"])
     out["touch_buttons"] = btns
     out["yes_no"] = "red" in btns and "blue" in btns

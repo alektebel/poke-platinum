@@ -49,6 +49,7 @@ class WalkController(Controller):
         self.origin = None
         self.phase_start = 0
         self.fail = 0
+        self.visits = {}   # tiles entered this run; ping-pong = unreachable
 
     def step(self, app):
         self.ticks += 1
@@ -71,21 +72,32 @@ class WalkController(Controller):
         dx, dz = tx - x, tz - z
         if dx == 0 and dz == 0:
             app.release_all()
+            self.phase = "arrived"
             return True
 
         if self.phase == "idle":
+            n = self.visits[(x, z)] = self.visits.get((x, z), 0) + 1
+            if n > 3:
+                # bouncing between the same tiles: target is not reachable
+                # by walking (sealed or across water/ledges) — give up
+                app.release_all()
+                self.phase = "unreachable"
+                return True
             mem = getattr(app, "memory", None)
             walls = set()
-            if mem is not None:
+            if mem is not None and not self.body.get("ignore_walls"):
                 m = mem.data["maps"].get(str(map_id), {})
                 walls = {w.split(",")[2] for w in m.get("walls", [])
                          if w.startswith(f"{x},{z},")}
-            cands = []
-            if abs(dx) >= abs(dz):
-                cands = ["right" if dx > 0 else "left", "down" if dz > 0 else "up"]
-            else:
-                cands = ["down" if dz > 0 else "up", "right" if dx > 0 else "left"]
-            dirs = [c for c in cands if c not in walls] or cands
+            # all four dirs, best-first by progress toward the target
+            cands = sorted(self.DIRS, key=lambda d: -(dx * self.DIRS[d][0] + dz * self.DIRS[d][1]))
+            dirs = [c for c in cands if c not in walls]
+            if not dirs:
+                # every step from here is a known wall: give up now instead
+                # of bumping until max_frames
+                app.release_all()
+                self.phase = "blocked"
+                return True
             self.hold_dir = dirs[0]
             self.origin = (x, z)
             self.phase = "hold"
@@ -102,9 +114,12 @@ class WalkController(Controller):
         if self.ticks - self.phase_start >= self.settle_frames:
             mem = getattr(app, "memory", None)
             if (x, z) == self.origin:
-                self.fail += 1
-                if self.fail >= 2 and mem is not None:
-                    mem.learn_wall(map_id, self.origin[0], self.origin[1], self.hold_dir)
+                if facing == self.hold_dir:
+                    # only aligned bumps are wall evidence: a player still
+                    # turning (cornering) fails to move without a wall
+                    self.fail += 1
+                    if self.fail >= 2 and mem is not None:
+                        mem.learn_wall(map_id, self.origin[0], self.origin[1], self.hold_dir)
             else:
                 self.fail = 0
             self.phase = "idle"

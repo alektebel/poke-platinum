@@ -35,14 +35,19 @@ class Memory:
 
     def event(self, kind, **kw):
         with self.lock:
-            self.events.append({"seq": self.event_seq, "frame": time.time(), "kind": kind, **kw})
+            self.events.append({"seq": self.event_seq, "t": time.time(), "kind": kind, **kw})
             self.event_seq += 1
             self.save()
 
     def events_since(self, since):
         return [e for e in self.events if e["seq"] > since]
 
+    def _valid_map(self, map_id):
+        return isinstance(map_id, int) and 0 <= map_id < 100000
+
     def visit(self, map_id, x, z):
+        if not self._valid_map(map_id):
+            return
         m = self._map(map_id)
         tile = f"{x},{z}"
         with self.lock:
@@ -51,6 +56,8 @@ class Memory:
                 self.save()
 
     def learn_wall(self, map_id, x, z, facing):
+        if not self._valid_map(map_id):
+            return
         m = self._map(map_id)
         wall = f"{x},{z},{facing}"
         with self.lock:
@@ -60,6 +67,8 @@ class Memory:
                 self.event("wall_learned", map=map_id, x=x, z=z, dir=facing)
 
     def learn_warp(self, from_map, x, z, to_map):
+        if not self._valid_map(from_map) or not self._valid_map(to_map):
+            return
         m = self._map(from_map)
         with self.lock:
             m["warps"][f"{x},{z}"] = to_map
