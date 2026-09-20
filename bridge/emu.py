@@ -10,6 +10,7 @@ from desmume.emulator import DeSmuME
 
 from bridge import actuator
 from bridge.keys import KEY_NAMES
+from bridge.memory import Memory
 from bridge.sensor import Sensor
 
 
@@ -34,6 +35,7 @@ class EmuApp:
         self.queue = []
         self.queue_lock = threading.Lock()
         self.keypad = 0
+        self.memory = Memory(os.path.join(os.path.dirname(rom_path), "states", "memory.json"))
         self.sensor = Sensor(self)
         self.controller = None
         self._fps = 0.0

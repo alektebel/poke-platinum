@@ -95,24 +95,40 @@ def execute(app, body):
 
         if action == "walk_to":
             from bridge.controllers import WalkController
-            x, y = body.get("x"), body.get("y")
-            if not isinstance(x, int) or not isinstance(y, int):
+            x, z = body.get("x"), body.get("z", body.get("y"))
+            if not isinstance(x, int) or not isinstance(z, int):
                 return {"ok": False, "reason": "bad_coords"}
-            return _start_controller(app, WalkController(x, y, body))
+            return _start_controller(app, WalkController(x, z, body))
 
         if action == "menu_navigate":
             from bridge.controllers import MenuController
             return _start_controller(app, MenuController(body))
 
-        if action == "battle_choice":
+        if action == "battle_fight":
             from bridge.controllers import BattleController
             return _start_controller(app, BattleController(body))
+
+        if action == "note":
+            text = body.get("text")
+            mem = getattr(app, "memory", None)
+            if not isinstance(text, str) or mem is None:
+                return {"ok": False, "reason": "bad_note"}
+            mem.note(text)
+            return {"ok": True, "frame": app.frame}
 
         if action == "debug_read":
             addr = _parse_int(body.get("addr", 0))
             n = min(_parse_int(body.get("len", 16)), 4096)
             data = app.emu.memory.read(addr, addr + n, 1, False)
             return {"ok": True, "addr": hex(addr), "hex": bytes(data).hex()}
+
+        if action == "debug_write":
+            addr = _parse_int(body.get("addr", 0))
+            data = bytes.fromhex(body.get("data", ""))
+            if not data or len(data) > 256:
+                return {"ok": False, "reason": "bad_data"}
+            app.emu.memory.write(addr, data, len(data))
+            return {"ok": True, "addr": hex(addr), "wrote": len(data)}
 
         if action == "debug_scan":
             start = _parse_int(body.get("start", 0x02000000))

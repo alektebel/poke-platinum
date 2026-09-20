@@ -1,12 +1,12 @@
 CATALOG = {
-    "version": 1,
+    "version": 2,
     "primitives": {
         "tap": {"params": {"key": "A|B|X|Y|L|R|START|SELECT|UP|DOWN|LEFT|RIGHT", "frames": "1-30, default 2"}},
         "press": {"params": {"keys": ["A", "B"], "frames": "default 2"}},
         "hold": {"params": {"key": "..."}},
         "release": {"params": {"key": "..."}},
         "release_all": {},
-        "touch": {"params": {"x": "0-255", "y": "0-191"}},
+        "touch": {"params": {"x": "0-255", "y": "0-191 bottom screen"}},
         "touch_release": {},
         "wait": {"params": {"frames": "1-3600"}},
         "reset": {},
@@ -16,14 +16,25 @@ CATALOG = {
     },
     "goals": {
         "advance_dialog": {"params": {"max_taps": "1-300, default 60"}, "note": "mashes A to advance/complete dialog"},
-        "walk_to": {"params": {"x": "int", "y": "int"}, "note": "grid pathfind to tile (needs sensor)"},
+        "walk_to": {"params": {"x": "int", "z": "int", "max_frames": "int"}, "note": "greedy walker, learns walls into /memory, auto-advances dialogs en route"},
         "menu_navigate": {"params": {"dir": "up|down|left|right", "count": "int", "confirm": "bool"}},
-        "battle_choice": {"params": {"kind": "move|switch|item|run", "index": "0-3"}},
+        "battle_fight": {"params": {"index": "0-3", "max_frames": "int"}, "note": "screen-driven: FIGHT + move 0 while HP bars visible"},
+        "note": {"params": {"text": "str"}, "note": "store an LLM observation in /memory"},
         "stop_goal": {},
     },
     "reads": {
-        "GET /state": "full JSON game snapshot",
+        "GET /state": "JSON snapshot: game{scene,map,player,objects} + screen{message_box,yes_no,battle,hp_bars,touch_buttons}",
         "GET /ping": "liveness + fps",
         "GET /screen?part=top|bottom": "PNG frame",
+        "GET /catalog": "this catalog",
+        "GET /events?since=N": "event stream (moved, map_changed, warp_learned, wall_learned, dialog/battle transitions, notes)",
+        "GET /memory": "atlas: visited tiles, learned walls, warp graph, LLM notes",
+        "GET /mem?addr=&len=": "raw RAM read (hex), len <= 1MB",
+    },
+    "debug_actions": {
+        "debug_read": {"params": {"addr": "int/hex", "len": "default 16, max 4096"}},
+        "debug_scan": {"params": {"start": "addr", "end": "addr", "value": "int", "size": "4", "mask": "hex"}},
+        "debug_mark": {"note": "snapshot 0x02000000-0x02400000"},
+        "debug_diff": {"note": "u32 changes since debug_mark (max 400)"},
     },
 }

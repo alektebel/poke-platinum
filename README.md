@@ -28,4 +28,22 @@ python3 tools/play.py shot out.png   # save a frame
 ## Status
 
 - Bridge, input injection, touch, savestates, screenshots: working
-- Sensor RAM map: calibrating against live gameplay (gSystem / party / position)
+- Sensor RAM map: wired and verified against live gameplay
+  - `sFieldSystem` static (0x021BF680) → FieldSystem → Location / PlayerAvatar / MapObject
+  - `/state` returns scene, map id, player grid x/z/facing, gender
+  - Party block in the SaveData body: located at starter acquisition (TODO)
+- Intro automation: title → Rowan script → bedroom driven by `tools/driver.py`
+  (note: intro touch boxes need ≥10-frame key holds; bottom screen starts at
+  composite row 196 of 388)
+- Savestates: `rom/states/bedroom.ds0` = post-intro bedroom, control returned
+
+## Sensor map (calibrated)
+
+```
+sFieldSystem (0x021BF680) -> FieldSystem*
+FS+0x0C SaveData*   FS+0x1C Location*   FS+0x38 MapObjectManager*   FS+0x3C PlayerAvatar*
+Location:    mapHeaderID@0  warpId@4  x@8  z@0xC  facing@0x10
+PlayerAvatar: gender@0x20   MapObject*@0x30
+MapObject:   facingDir@0x28  x@0x64  y@0x68  z@0x6C  pos.fx32@0x70
+sSaveDataPtr (0x021C0794) -> SaveData*  (body @+0x14; party page TBD)
+```

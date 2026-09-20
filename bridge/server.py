@@ -35,6 +35,23 @@ def make_handler(state: BridgeState):
                 self._json(200, app.sensor.snapshot())
             elif self.path == "/catalog":
                 self._json(200, state.catalog)
+            elif self.path.startswith("/events"):
+                since = int(self.path.split("since=")[1].split("&")[0]) if "since=" in self.path else 0
+                mem = getattr(app, "memory", None)
+                self._json(200, {"events": mem.events_since(since) if mem else []})
+            elif self.path == "/memory":
+                mem = getattr(app, "memory", None)
+                self._json(200, mem.snapshot() if mem else {"error": "no_memory"})
+            elif self.path.startswith("/mem"):
+                try:
+                    qs = self.path.split("?", 1)[1] if "?" in self.path else ""
+                    params = dict(p.split("=", 1) for p in qs.split("&") if "=" in p)
+                    addr = int(params.get("addr", "0"), 0)
+                    length = min(int(params.get("len", "256"), 0), 1 << 20)
+                    data = bytes(app.emu.memory.read(addr, addr + length, 1, False))
+                    self._json(200, {"addr": hex(addr), "len": length, "hex": data.hex()})
+                except Exception as e:
+                    self._json(400, {"error": f"bad_mem:{e}"})
             elif self.path.startswith("/screen"):
                 png, _ = app.last_png()
                 if png is None:
@@ -74,14 +91,27 @@ def make_handler(state: BridgeState):
                 self._json(400, {"ok": False, "reason": "bad_json"})
                 return
             pending = state.app.submit(body)
-            goal = body.get("action") in ("advance_dialog", "walk_to", "menu_navigate", "battle_choice")
-            timeout = 180 if goal else 8
+            timeout = _timeout_for(body)
             if pending.done.wait(timeout):
                 self._json(200, pending.result)
             else:
                 self._json(504, {"ok": False, "reason": "timeout"})
 
     return Handler
+
+
+def _timeout_for(body):
+    action = body.get("action", "")
+    if action in ("advance_dialog", "walk_to", "menu_navigate", "battle_fight"):
+        return 600
+    if action in ("debug_scan", "debug_mark", "debug_diff"):
+        return 300
+    if action == "wait":
+        try:
+            return min(int(body.get("frames", 1)) / 30.0 + 10, 180)
+        except (TypeError, ValueError):
+            return 20
+    return 60
 
 
 def start(state: BridgeState, port):
